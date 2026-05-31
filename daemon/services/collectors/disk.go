@@ -3,6 +3,7 @@ package collectors
 import (
 	"bufio"
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -760,7 +761,7 @@ func (c *DiskCollector) enrichWithZFSPoolUsage(disk *dto.DiskInfo, poolUsages ma
 
 func (c *DiskCollector) getZFSPoolUsages() map[string]zfsPoolUsage {
 	output, err := lib.ExecCommandOutput(constants.ZpoolBin, "list", "-Hp", "-o",
-		"name,size,allocated,free,capacity")
+		"name,size,allocated,free")
 	if err != nil {
 		logger.Debug("Disk: Failed to load ZFS pool usage: %v", err)
 		return nil
@@ -788,7 +789,7 @@ func parseZFSPoolUsageLine(line string) (string, zfsPoolUsage, bool) {
 	}
 
 	fields := strings.Fields(line)
-	if len(fields) < 5 {
+	if len(fields) < 4 {
 		return "", zfsPoolUsage{}, false
 	}
 
@@ -807,9 +808,9 @@ func parseZFSPoolUsageLine(line string) (string, zfsPoolUsage, bool) {
 		return "", zfsPoolUsage{}, false
 	}
 
-	usagePercent, err := strconv.ParseFloat(strings.TrimSuffix(fields[4], "%"), 64)
-	if err != nil {
-		return "", zfsPoolUsage{}, false
+	usagePercent := 0.0
+	if size > 0 {
+		usagePercent = roundToThreeDecimals(float64(used) / float64(size) * 100)
 	}
 
 	return fields[0], zfsPoolUsage{
@@ -818,6 +819,10 @@ func parseZFSPoolUsageLine(line string) (string, zfsPoolUsage, bool) {
 		Free:         free,
 		UsagePercent: usagePercent,
 	}, true
+}
+
+func roundToThreeDecimals(value float64) float64 {
+	return math.Round(value*1000) / 1000
 }
 
 // enrichWithSpinState checks the current spin state of the disk

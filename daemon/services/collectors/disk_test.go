@@ -674,9 +674,9 @@ func TestResolveZFSPoolName(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:  "mount point can resolve pool",
-			disk:  dto.DiskInfo{Name: "member1", MountPoint: "/mnt/cache/appdata"},
-			pools: poolUsages,
+			name:     "mount point can resolve pool",
+			disk:     dto.DiskInfo{Name: "member1", MountPoint: "/mnt/cache/appdata"},
+			pools:    poolUsages,
 			wantPool: "cache",
 			wantOK:   true,
 		},
@@ -697,39 +697,39 @@ func TestResolveZFSPoolName(t *testing.T) {
 
 func TestParseZFSPoolUsageLine(t *testing.T) {
 	tests := []struct {
-		name    string
-		output  string
+		name     string
+		output   string
 		wantPool string
-		want    zfsPoolUsage
-		wantOK  bool
+		want     zfsPoolUsage
+		wantOK   bool
 	}{
 		{
-			name:   "plain capacity number",
-			output: "cache\t965845127168\t180000000000\t785845127168\t18",
+			name:     "usage percent is calculated from size and allocated",
+			output:   "cache\t965845127168\t180000000000\t785845127168",
 			wantPool: "cache",
 			want: zfsPoolUsage{
 				Size:         965845127168,
 				Used:         180000000000,
 				Free:         785845127168,
-				UsagePercent: 18,
+				UsagePercent: 18.637,
 			},
 			wantOK: true,
 		},
 		{
-			name:   "capacity with percent suffix",
-			output: "cache\t965845127168\t180000000000\t785845127168\t18%",
+			name:     "usage percent is rounded to three decimals",
+			output:   "cache\t962072674304\t178519949312\t783552724992",
 			wantPool: "cache",
 			want: zfsPoolUsage{
-				Size:         965845127168,
-				Used:         180000000000,
-				Free:         785845127168,
-				UsagePercent: 18,
+				Size:         962072674304,
+				Used:         178519949312,
+				Free:         783552724992,
+				UsagePercent: 18.556,
 			},
 			wantOK: true,
 		},
 		{
 			name:   "invalid output is rejected",
-			output: "cache\tbad\t180000000000\t785845127168\t18",
+			output: "cache\tbad\t180000000000\t785845127168",
 			wantOK: false,
 		},
 	}
@@ -761,19 +761,19 @@ func TestEnrichWithZFSPoolUsage(t *testing.T) {
 			Size:         965845127168,
 			Used:         180000000000,
 			Free:         785845127168,
-			UsagePercent: 18,
+			UsagePercent: 18.637,
 		},
 	}
 
 	t.Run("zfs cache disk gets pool usage", func(t *testing.T) {
 		disk := &dto.DiskInfo{
-			Name:          "cache2",
-			Role:          "cache",
-			FileSystem:    "zfs",
-			Size:          1,
-			Used:          2,
-			Free:          3,
-			UsagePercent:  4,
+			Name:         "cache2",
+			Role:         "cache",
+			FileSystem:   "zfs",
+			Size:         1,
+			Used:         2,
+			Free:         3,
+			UsagePercent: 4,
 		}
 
 		applied := collector.enrichWithZFSPoolUsage(disk, poolUsages)
