@@ -51,4 +51,17 @@ var (
 	TopicFanControlUpdate = domain.NewTopic[*dto.FanControlStatus]("fan_control_update")
 	// TopicTuningUpdate is published by the tuning collector with *dto.TuningInfo.
 	TopicTuningUpdate = domain.NewTopic[*dto.TuningInfo]("tuning_update")
+	// TopicDockerUpdatesUpdate is published by the docker_update collector with *dto.ContainerUpdatesResult.
+	TopicDockerUpdatesUpdate = domain.NewTopic[*dto.ContainerUpdatesResult]("docker_updates_update")
+	// TopicDockerNetworksUpdate is published by the docker_networks collector with *dto.DockerNetworkList.
+	TopicDockerNetworksUpdate = domain.NewTopic[*dto.DockerNetworkList]("docker_networks_update")
+	// TopicPluginUpdatesUpdate is published by the plugin_update collector with *dto.PluginList.
+	TopicPluginUpdatesUpdate = domain.NewTopic[*dto.PluginList]("plugin_updates_update")
+	// TopicOSUpdateUpdate is published by the os_update collector with *dto.OSUpdateStatus.
+	TopicOSUpdateUpdate = domain.NewTopic[*dto.OSUpdateStatus]("os_update_update")
+	// TopicMoverUpdate is published by the mover collector with *dto.MoverStatus.
+	TopicMoverUpdate = domain.NewTopic[*dto.MoverStatus]("mover_update")
+	// TopicAgentWake is published by alerting/watchdog to wake the autonomous agent
+	// with a dto.AgentWakeEvent describing the triggering incident.
+	TopicAgentWake = domain.NewTopic[dto.AgentWakeEvent]("agent_wake")
 )

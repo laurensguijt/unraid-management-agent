@@ -2,30 +2,45 @@ package dto
 
 import "time"
 
+// Container update status values for ContainerInfo.UpdateStatus.
+const (
+	UpdateStatusUpToDate  = "up_to_date"
+	UpdateStatusAvailable = "update_available"
+	UpdateStatusUnknown   = "unknown"
+)
+
 // ContainerInfo contains Docker container information
 type ContainerInfo struct {
-	ID             string          `json:"id" example:"abc123def456"`
-	Name           string          `json:"name" example:"plex"`
-	Image          string          `json:"image" example:"plexinc/pms-docker:latest"`
-	Version        string          `json:"version" example:"1.40.1"`
-	State          string          `json:"state" example:"running"`
-	Status         string          `json:"status" example:"Up 2 days"`
-	NetworkMode    string          `json:"network_mode" example:"bridge"`
-	IPAddress      string          `json:"ip_address" example:"172.17.0.2"`
-	CPUPercent     float64         `json:"cpu_percent" example:"5.2"`
-	MemoryUsage    uint64          `json:"memory_usage_bytes" example:"1073741824"`
-	MemoryUsageMB  float64         `json:"memory_usage_mb" example:"1024.0"`
-	MemoryLimit    uint64          `json:"memory_limit_bytes" example:"8589934592"`
-	MemoryPercent  float64         `json:"memory_percent" example:"12.5"`
-	MemoryDisplay  string          `json:"memory_display" example:"1 GiB / 8 GiB"`
-	NetworkRX      uint64          `json:"network_rx_bytes" example:"104857600"`
-	NetworkTX      uint64          `json:"network_tx_bytes" example:"52428800"`
-	Ports          []PortMapping   `json:"ports"`
-	PortMappings   []string        `json:"port_mappings"`
-	VolumeMappings []VolumeMapping `json:"volume_mappings"`
-	RestartPolicy  string          `json:"restart_policy" example:"unless-stopped"`
-	Uptime         string          `json:"uptime" example:"2 days"`
-	Timestamp      time.Time       `json:"timestamp"`
+	ID                   string          `json:"id" example:"abc123def456"`
+	Name                 string          `json:"name" example:"plex"`
+	Image                string          `json:"image" example:"plexinc/pms-docker:latest"`
+	Version              string          `json:"version" example:"1.40.1"`
+	State                string          `json:"state" example:"running"`
+	Status               string          `json:"status" example:"Up 2 days"`
+	NetworkMode          string          `json:"network_mode" example:"bridge"`
+	IPAddress            string          `json:"ip_address" example:"172.17.0.2"`
+	MACAddress           string          `json:"mac_address,omitempty" example:"02:42:ac:11:00:02"` // Container MAC (Docker 29 / Unraid 7.3 fixed-MAC support)
+	CPUPercent           float64         `json:"cpu_percent" example:"5.2"`
+	MemoryUsage          uint64          `json:"memory_usage_bytes" example:"1073741824"`
+	MemoryUsageMB        float64         `json:"memory_usage_mb" example:"1024.0"`
+	MemoryLimit          uint64          `json:"memory_limit_bytes" example:"8589934592"`
+	MemoryPercent        float64         `json:"memory_percent" example:"12.5"`
+	MemoryDisplay        string          `json:"memory_display" example:"1 GiB / 8 GiB"`
+	NetworkRX            uint64          `json:"network_rx_bytes" example:"104857600"`
+	NetworkTX            uint64          `json:"network_tx_bytes" example:"52428800"`
+	NetworkRXBytesPerSec float64         `json:"network_rx_bytes_per_sec" example:"1024.0"`
+	NetworkTXBytesPerSec float64         `json:"network_tx_bytes_per_sec" example:"512.0"`
+	Ports                []PortMapping   `json:"ports"`
+	PortMappings         []string        `json:"port_mappings"`
+	VolumeMappings       []VolumeMapping `json:"volume_mappings"`
+	RestartPolicy        string          `json:"restart_policy" example:"unless-stopped"`
+	Uptime               string          `json:"uptime" example:"2 days"`
+	RestartCount         int             `json:"restart_count" example:"0"`
+	// Update status — populated by merging the DockerUpdate collector's cache at read time.
+	UpdateStatus    string     `json:"update_status" example:"up_to_date"` // see UpdateStatus* constants
+	UpdateAvailable *bool      `json:"update_available,omitempty"`         // null when not yet checked / registry unreachable (field omitted in JSON)
+	UpdateChecked   *time.Time `json:"update_checked,omitempty"`
+	Timestamp       time.Time  `json:"timestamp"`
 }
 
 // PortMapping represents a port mapping
@@ -51,6 +66,19 @@ type ContainerUpdateInfo struct {
 	LatestDigest    string    `json:"latest_digest,omitempty"`
 	UpdateAvailable bool      `json:"update_available" example:"true"`
 	Timestamp       time.Time `json:"timestamp"`
+}
+
+// Status derives the tri-state update status from the digests.
+// Returns "unknown" when the latest (remote) digest could not be determined,
+// so callers never report "up to date" when the check actually failed.
+func (u ContainerUpdateInfo) Status() string {
+	if u.LatestDigest == "" {
+		return UpdateStatusUnknown
+	}
+	if u.UpdateAvailable {
+		return UpdateStatusAvailable
+	}
+	return UpdateStatusUpToDate
 }
 
 // ContainerUpdateResult contains the result of a container update operation

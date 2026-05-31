@@ -24,12 +24,13 @@ type haEntityOpts struct {
 	deviceClass    string
 	stateClass     string
 	entityCategory string
-	payloadOn      string // for binary_sensor and switch
-	payloadOff     string // for binary_sensor and switch
-	payloadPress   string // for button
-	stateOn        string // for switch (value that means ON)
-	stateOff       string // for switch (value that means OFF)
-	optimistic     bool   // for switch (no state feedback)
+	payloadOn      string   // for binary_sensor and switch
+	payloadOff     string   // for binary_sensor and switch
+	payloadPress   string   // for button
+	stateOn        string   // for switch (value that means ON)
+	stateOff       string   // for switch (value that means OFF)
+	optimistic     bool     // for switch (no state feedback)
+	eventTypes     []string // for event entity type
 }
 
 // discoveryTracker tracks published per-item HA discovery entities
@@ -163,6 +164,12 @@ func (c *Client) publishHAEntity(opts haEntityOpts) {
 		config["payload_press"] = press
 	}
 
+	// event-specific config — HA fires an event each time a JSON payload
+	// containing "event_type" (one of event_types) arrives on the state topic.
+	if opts.entityType == "event" {
+		config["event_types"] = opts.eventTypes
+	}
+
 	if err := c.publishJSON(discoveryTopic, config); err != nil {
 		logger.Warning("MQTT: Failed to publish HA discovery for %s: %v", opts.id, err)
 	}
@@ -273,6 +280,38 @@ func (c *Client) publishSystemDiscovery() {
 		id: "ram_total", name: "System: RAM Total", unit: "B",
 		icon: "mdi:memory", template: "{{ value_json.ram_total_bytes }}",
 		deviceClass: "data_size", stateClass: "measurement", entityCategory: "diagnostic",
+	})
+
+	// Swap sensors
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "swap_usage", name: "System: Swap Usage", unit: "%",
+		icon: "mdi:harddisk", template: "{{ value_json.swap_usage_percent | round(1) }}",
+		stateClass: "measurement",
+	})
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "swap_used", name: "System: Swap Used", unit: "B",
+		icon: "mdi:harddisk", template: "{{ value_json.swap_used_bytes }}",
+		deviceClass: "data_size", stateClass: "measurement",
+	})
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "swap_free", name: "System: Swap Free", unit: "B",
+		icon: "mdi:harddisk", template: "{{ value_json.swap_free_bytes }}",
+		deviceClass: "data_size", stateClass: "measurement",
+	})
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "swap_total", name: "System: Swap Total", unit: "B",
+		icon: "mdi:harddisk", template: "{{ value_json.swap_total_bytes }}",
+		deviceClass: "data_size", stateClass: "measurement", entityCategory: "diagnostic",
+	})
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "swappiness", name: "System: Swappiness",
+		icon: "mdi:tune-variant", template: "{{ value_json.swappiness }}",
+		stateClass: "measurement", entityCategory: "diagnostic",
 	})
 
 	// Motherboard temperature
@@ -558,6 +597,16 @@ func (c *Client) publishNotificationDiscovery() {
 		commandTopic: c.buildCommandTopic("notifications", "archive_all"),
 		id:           "notif_archive_all", name: "Notifications: Archive All",
 		icon: "mdi:archive-arrow-down",
+	})
+
+	// Notification event entity — fires an HA event for each new Unraid
+	// notification, carrying its title/subject/description/importance as
+	// event attributes so automations can react to individual notifications.
+	c.publishHAEntity(haEntityOpts{
+		entityType: "event", stateTopic: c.buildTopic("notifications/event"),
+		id: "notif_event", name: "Notifications: Event",
+		icon:       "mdi:bell-ring",
+		eventTypes: []string{"alert", "warning", "info"},
 	})
 }
 
@@ -860,6 +909,7 @@ func (c *Client) publishContainerEntities(topic, prefix, displayName, nameID str
 		prefix + "_memory",
 		prefix + "_net_rx",
 		prefix + "_net_tx",
+		prefix + "_mac",
 		prefix + "_switch",
 		prefix + "_restart",
 		prefix + "_pause",
@@ -895,6 +945,14 @@ func (c *Client) publishContainerEntities(topic, prefix, displayName, nameID str
 		id: prefix + "_net_tx", name: fmt.Sprintf("Docker: %s Network TX", displayName), unit: "B",
 		icon: "mdi:upload", template: "{{ value_json.network_tx_bytes }}",
 		deviceClass: "data_size", stateClass: "total_increasing",
+	})
+	// MAC address (Docker 29 / Unraid 7.3 fixed-MAC support)
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: prefix + "_mac", name: fmt.Sprintf("Docker: %s MAC Address", displayName),
+		icon:           "mdi:ethernet",
+		template:       "{{ value_json.mac_address | default('') }}",
+		entityCategory: "diagnostic",
 	})
 
 	// Power switch (start/stop)
@@ -1384,6 +1442,7 @@ func (c *Client) publishZFSEntities(topic, prefix, displayName string) []string 
 		prefix + "_fragmentation",
 		prefix + "_errors",
 		prefix + "_healthy",
+		prefix + "_corrupted_files",
 	}
 
 	c.publishHAEntity(haEntityOpts{
@@ -1421,6 +1480,14 @@ func (c *Client) publishZFSEntities(topic, prefix, displayName string) []string 
 		id: prefix + "_healthy", name: fmt.Sprintf("ZFS: %s Healthy", displayName),
 		icon: "mdi:check-circle", template: "{{ 'ON' if value_json.health == 'ONLINE' else 'OFF' }}",
 		deviceClass: "safety",
+	})
+	// Corrupted file count (Unraid 7.3 / ZFS 2.4.1 surfaces these without a scrub)
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: prefix + "_corrupted_files", name: fmt.Sprintf("ZFS: %s Corrupted Files", displayName),
+		icon:       "mdi:file-alert",
+		template:   "{{ value_json.corrupted_files | default([]) | count }}",
+		stateClass: "measurement",
 	})
 
 	return ids
@@ -1545,6 +1612,30 @@ func (c *Client) publishHardwareDiscovery() {
 		id: "memory_slots_total", name: "Hardware: Memory Slots",
 		icon:           "mdi:memory",
 		template:       "{{ value_json.memory_array.number_of_devices | default(0) }}",
+		entityCategory: "diagnostic",
+	})
+	// Chassis serial (new in Unraid 7.3)
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "chassis_serial", name: "Hardware: Chassis Serial",
+		icon:           "mdi:barcode",
+		template:       "{{ value_json.chassis.serial_number | default('') }}",
+		entityCategory: "diagnostic",
+	})
+	// TPM presence (Unraid 7.3 TPM-based licensing)
+	c.publishHAEntity(haEntityOpts{
+		entityType: "binary_sensor", stateTopic: topic,
+		id: "tpm_present", name: "Hardware: TPM Present",
+		icon:           "mdi:shield-key",
+		template:       "{{ 'ON' if value_json.tpm.present | default(false) else 'OFF' }}",
+		entityCategory: "diagnostic",
+	})
+	// Boot device type (Unraid 7.3 internal boot)
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "boot_device_type", name: "Hardware: Boot Device Type",
+		icon:           "mdi:usb-flash-drive",
+		template:       "{{ value_json.boot.device_type | default('unknown') }}",
 		entityCategory: "diagnostic",
 	})
 }
@@ -1783,6 +1874,15 @@ func (c *Client) publishZFSARCDiscovery() {
 		id: "arc_target_size", name: "ZFS ARC: Target Size", unit: "B",
 		icon:        "mdi:memory",
 		template:    "{{ value_json.target_size_bytes }}",
+		deviceClass: "data_size", stateClass: "measurement",
+		entityCategory: "diagnostic",
+	})
+	// Configured zfs_arc_max (0 = auto) — Unraid 7.3 first-class tunable
+	c.publishHAEntity(haEntityOpts{
+		entityType: "sensor", stateTopic: topic,
+		id: "arc_configured_max", name: "ZFS ARC: Configured Max", unit: "B",
+		icon:        "mdi:memory",
+		template:    "{{ value_json.configured_max_bytes | default(0) }}",
 		deviceClass: "data_size", stateClass: "measurement",
 		entityCategory: "diagnostic",
 	})

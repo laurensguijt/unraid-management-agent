@@ -92,3 +92,5 @@ PHASE_2_COMPLETION_SUMMARY.md
 # AI scratch directory (temporary AI working files)
 .ai-scratch/*
 !.ai-scratch/.gitkeep
+.claude/settings.json
+.claude/settings.local.json

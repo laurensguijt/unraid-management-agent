@@ -20,6 +20,233 @@
     "host": "localhost:8043",
     "basePath": "/api/v1",
     "paths": {
+        "/agent/sessions": {
+            "get": {
+                "description": "Retrieve all agent sessions, newest first",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "List agent sessions",
+                "responses": {
+                    "200": {
+                        "description": "List of sessions",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/dto.AgentSession"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Agent disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Start a new on-demand agent session for the given goal and run it to completion",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "Start agent session",
+                "parameters": [
+                    {
+                        "description": "Session goal",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "goal": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Completed session",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AgentSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to run session",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Agent disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/sessions/{id}": {
+            "get": {
+                "description": "Retrieve a single agent session by ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "Get agent session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Session",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AgentSession"
+                        }
+                    },
+                    "404": {
+                        "description": "Session not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Agent disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/sessions/{id}/approve": {
+            "post": {
+                "description": "Approve or reject a pending high-risk tool call, resuming the session",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "Approve or reject a pending agent action",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Approval decision",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "action_id": {
+                                    "type": "string"
+                                },
+                                "approve": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated session",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AgentSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or service error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Agent disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/sessions/{id}/cancel": {
+            "post": {
+                "description": "Cancel a running or awaiting-approval agent session",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Agent"
+                ],
+                "summary": "Cancel an agent session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Session ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cancelled session",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AgentSession"
+                        }
+                    },
+                    "400": {
+                        "description": "Service error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Agent disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/alerts/firing": {
             "get": {
                 "description": "Get only alert rules currently in the firing state",
@@ -282,6 +509,87 @@
                         "description": "Alert statuses",
                         "schema": {
                             "$ref": "#/definitions/dto.AlertsStatusResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/alerts/templates": {
+            "get": {
+                "description": "Retrieve curated, disabled-by-default alert rule templates using trend/predictive metrics",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Alerts"
+                ],
+                "summary": "List alert rule templates",
+                "responses": {
+                    "200": {
+                        "description": "List of alert rule templates",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/dto.AlertRule"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/alerts/templates/{id}/enable": {
+            "post": {
+                "description": "Enable a template by ID, creating or updating the corresponding alert rule. Idempotent: calling multiple times updates the same rule. Optional JSON body may specify channels; defaults to [\"unraid\"].",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Alerts"
+                ],
+                "summary": "Enable an alert rule template",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Template ID (e.g. tmpl-array-fill)",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional channels",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Enabled alert rule",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AlertRule"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown template",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Alerting engine not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
                         }
                     }
                 }
@@ -864,6 +1172,26 @@
                 }
             }
         },
+        "/docker/networks": {
+            "get": {
+                "description": "Serves the cached Docker network list. Returns an empty list when no cache is available yet.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Docker"
+                ],
+                "summary": "Get Docker networks",
+                "responses": {
+                    "200": {
+                        "description": "Docker network list",
+                        "schema": {
+                            "$ref": "#/definitions/dto.DockerNetworkList"
+                        }
+                    }
+                }
+            }
+        },
         "/docker/stats": {
             "get": {
                 "description": "Returns aggregate CPU and memory statistics across all running containers",
@@ -918,23 +1246,43 @@
         },
         "/docker/updates": {
             "get": {
-                "description": "Pull latest images and check if any containers have updates available",
+                "description": "Serves the cached container update result. Returns an empty result when no cache is available yet.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Docker"
                 ],
-                "summary": "Check all containers for updates",
+                "summary": "Get cached container update status",
                 "responses": {
                     "200": {
                         "description": "Container update status",
                         "schema": {
                             "$ref": "#/definitions/dto.ContainerUpdatesResult"
                         }
+                    }
+                }
+            }
+        },
+        "/docker/updates/refresh": {
+            "post": {
+                "description": "Runs an immediate registry digest comparison for all containers and publishes the result.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Docker"
+                ],
+                "summary": "Force a container update re-check",
+                "responses": {
+                    "200": {
+                        "description": "Refreshed update status",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ContainerUpdatesResult"
+                        }
                     },
                     "500": {
-                        "description": "Failed to check updates",
+                        "description": "Check failed",
                         "schema": {
                             "$ref": "#/definitions/dto.Response"
                         }
@@ -1886,6 +2234,26 @@
                 }
             }
         },
+        "/health/report": {
+            "get": {
+                "description": "Aggregate health signals from array, disks, containers, and firing alerts into a prioritized list of findings with recommended actions",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Get system health report",
+                "responses": {
+                    "200": {
+                        "description": "Health report",
+                        "schema": {
+                            "$ref": "#/definitions/dto.HealthReport"
+                        }
+                    }
+                }
+            }
+        },
         "/healthchecks": {
             "get": {
                 "description": "Get all configured health checks",
@@ -2264,6 +2632,73 @@
                         "description": "Prometheus metrics",
                         "schema": {
                             "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics/history": {
+            "get": {
+                "description": "Return in-memory ring-buffer samples and summary stats (slope, min, max, avg, last) for a named metric series. Pass entity for per-disk or per-container metrics.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Alerts"
+                ],
+                "summary": "Query metric history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Metric name (e.g. cpu_temp, array_used_pct, disk_temp)",
+                        "name": "metric",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Entity ID for per-entity metrics (e.g. disk ID, container ID)",
+                        "name": "entity",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Metric history",
+                        "schema": {
+                            "$ref": "#/definitions/dto.MetricHistoryResult"
+                        }
+                    },
+                    "400": {
+                        "description": "metric query parameter is required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    },
+                    "503": {
+                        "description": "Alerting engine not initialized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/mover": {
+            "get": {
+                "description": "Returns the cached mover status including active state, schedule, and last-run statistics. Returns a zero-value sentinel when no data is available yet.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Mover"
+                ],
+                "summary": "Get mover status",
+                "responses": {
+                    "200": {
+                        "description": "Mover status",
+                        "schema": {
+                            "$ref": "#/definitions/dto.MoverStatus"
                         }
                     }
                 }
@@ -2816,6 +3251,26 @@
                 }
             }
         },
+        "/os/update": {
+            "get": {
+                "description": "Returns the cached OS update status. No outbound network calls are made; the result is based on local files only. Returns an \"unknown\" sentinel when no local latest-version data is available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OS"
+                ],
+                "summary": "Get OS update availability",
+                "responses": {
+                    "200": {
+                        "description": "OS update status",
+                        "schema": {
+                            "$ref": "#/definitions/dto.OSUpdateStatus"
+                        }
+                    }
+                }
+            }
+        },
         "/plugins": {
             "get": {
                 "description": "Retrieve list of installed plugins with their versions and update status",
@@ -2844,28 +3299,19 @@
         },
         "/plugins/check-updates": {
             "get": {
-                "description": "Check all installed plugins for available updates",
+                "description": "Serves the cached plugin update result. Returns an empty result when no cache is available yet.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Plugins"
                 ],
-                "summary": "Check for plugin updates",
+                "summary": "Get cached plugin update status",
                 "responses": {
                     "200": {
-                        "description": "Plugins with available updates",
+                        "description": "Plugin update status",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/dto.PluginInfo"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Failed to check updates",
-                        "schema": {
-                            "$ref": "#/definitions/dto.Response"
+                            "$ref": "#/definitions/dto.PluginList"
                         }
                     }
                 }
@@ -2890,6 +3336,32 @@
                     },
                     "500": {
                         "description": "Failed to update plugins",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/plugins/updates/refresh": {
+            "post": {
+                "description": "Runs an immediate plugin update check and publishes the result.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Plugins"
+                ],
+                "summary": "Force a plugin update re-check",
+                "responses": {
+                    "200": {
+                        "description": "Refreshed plugin update status",
+                        "schema": {
+                            "$ref": "#/definitions/dto.PluginList"
+                        }
+                    },
+                    "500": {
+                        "description": "Check failed",
                         "schema": {
                             "$ref": "#/definitions/dto.Response"
                         }
@@ -2971,6 +3443,40 @@
                     },
                     "500": {
                         "description": "Failed to list processes",
+                        "schema": {
+                            "$ref": "#/definitions/dto.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/processes/io": {
+            "get": {
+                "description": "Get processes ranked by current disk I/O rate (bytes/sec), sampled from /proc/\u003cpid\u003e/io. Native, lightweight alternative to iotop-c.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Top processes by disk I/O",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Max processes to return (default: 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Processes ranked by disk I/O",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ProcessList"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to sample process I/O",
                         "schema": {
                             "$ref": "#/definitions/dto.Response"
                         }
@@ -4664,6 +5170,161 @@
                 }
             }
         },
+        "dto.ActionRef": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "restart_container"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string",
+                    "example": "abc123def456"
+                }
+            }
+        },
+        "dto.AgentMessage": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "tool_call_id": {
+                    "type": "string"
+                },
+                "tool_calls": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgentMsgToolCall"
+                    }
+                }
+            }
+        },
+        "dto.AgentMsgToolCall": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AgentSession": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "ended_at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "goal": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "pending_approval": {
+                    "$ref": "#/definitions/dto.ApprovalRequest"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/dto.AgentSessionStatus"
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgentStep"
+                    }
+                },
+                "tokens_used": {
+                    "type": "integer"
+                },
+                "transcript": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgentMessage"
+                    }
+                }
+            }
+        },
+        "dto.AgentSessionStatus": {
+            "type": "string",
+            "enum": [
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "awaiting_approval"
+            ],
+            "x-enum-varnames": [
+                "SessionRunning",
+                "SessionCompleted",
+                "SessionFailed",
+                "SessionCancelled",
+                "SessionAwaitingApproval"
+            ]
+        },
+        "dto.AgentStep": {
+            "type": "object",
+            "properties": {
+                "at": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "thought": {
+                    "type": "string"
+                },
+                "tool_calls": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgentToolCall"
+                    }
+                }
+            }
+        },
+        "dto.AgentToolCall": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "description": "raw JSON arguments",
+                    "type": "string"
+                },
+                "at": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "result": {
+                    "type": "string"
+                },
+                "risk_tier": {
+                    "$ref": "#/definitions/dto.RiskTier"
+                }
+            }
+        },
         "dto.AlertEvent": {
             "type": "object",
             "properties": {
@@ -4777,6 +5438,29 @@
                     "items": {
                         "$ref": "#/definitions/dto.AlertStatus"
                     }
+                }
+            }
+        },
+        "dto.ApprovalRequest": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "type": "string"
+                },
+                "args": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "requested_at": {
+                    "type": "string"
+                },
+                "risk_tier": {
+                    "$ref": "#/definitions/dto.RiskTier"
+                },
+                "tool_name": {
+                    "type": "string"
                 }
             }
         },
@@ -4903,6 +5587,36 @@
                 "version": {
                     "type": "string",
                     "example": "1.02"
+                }
+            }
+        },
+        "dto.BootInfo": {
+            "type": "object",
+            "properties": {
+                "boot_pool": {
+                    "description": "ZFS boot pool name when present",
+                    "type": "string",
+                    "example": "boot"
+                },
+                "boot_pool_type": {
+                    "description": "\"single\", \"mirror\" when on a ZFS boot pool",
+                    "type": "string",
+                    "example": "mirror"
+                },
+                "device": {
+                    "description": "Backing device of the boot partition",
+                    "type": "string",
+                    "example": "sda1"
+                },
+                "device_type": {
+                    "description": "\"usb\" (flash) or \"internal\"",
+                    "type": "string",
+                    "example": "usb"
+                },
+                "filesystem": {
+                    "description": "Boot partition filesystem",
+                    "type": "string",
+                    "example": "vfat"
                 }
             }
         },
@@ -5074,6 +5788,31 @@
                 }
             }
         },
+        "dto.ChassisInfo": {
+            "type": "object",
+            "properties": {
+                "asset_tag": {
+                    "type": "string",
+                    "example": "To be filled by O.E.M."
+                },
+                "manufacturer": {
+                    "type": "string",
+                    "example": "Supermicro"
+                },
+                "serial_number": {
+                    "type": "string",
+                    "example": "C1234567890"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "Tower"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "0123456789"
+                }
+            }
+        },
         "dto.CollectorIntervalRequest": {
             "type": "object",
             "properties": {
@@ -5197,6 +5936,11 @@
                     "type": "string",
                     "example": "172.17.0.2"
                 },
+                "mac_address": {
+                    "description": "Container MAC (Docker 29 / Unraid 7.3 fixed-MAC support)",
+                    "type": "string",
+                    "example": "02:42:ac:11:00:02"
+                },
                 "memory_display": {
                     "type": "string",
                     "example": "1 GiB / 8 GiB"
@@ -5229,9 +5973,17 @@
                     "type": "integer",
                     "example": 104857600
                 },
+                "network_rx_bytes_per_sec": {
+                    "type": "number",
+                    "example": 1024
+                },
                 "network_tx_bytes": {
                     "type": "integer",
                     "example": 52428800
+                },
+                "network_tx_bytes_per_sec": {
+                    "type": "number",
+                    "example": 512
                 },
                 "port_mappings": {
                     "type": "array",
@@ -5244,6 +5996,10 @@
                     "items": {
                         "$ref": "#/definitions/dto.PortMapping"
                     }
+                },
+                "restart_count": {
+                    "type": "integer",
+                    "example": 0
                 },
                 "restart_policy": {
                     "type": "string",
@@ -5259,6 +6015,18 @@
                 },
                 "timestamp": {
                     "type": "string"
+                },
+                "update_available": {
+                    "description": "null when not yet checked / registry unreachable (field omitted in JSON)",
+                    "type": "boolean"
+                },
+                "update_checked": {
+                    "type": "string"
+                },
+                "update_status": {
+                    "description": "Update status — populated by merging the DockerUpdate collector's cache at read time.",
+                    "type": "string",
+                    "example": "up_to_date"
                 },
                 "uptime": {
                     "type": "string",
@@ -5730,6 +6498,75 @@
                 }
             }
         },
+        "dto.DockerNetworkInfo": {
+            "type": "object",
+            "properties": {
+                "attachable": {
+                    "type": "boolean"
+                },
+                "container_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "created": {
+                    "type": "string"
+                },
+                "driver": {
+                    "type": "string",
+                    "example": "bridge"
+                },
+                "gateway": {
+                    "type": "string",
+                    "example": "172.17.0.1"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "internal": {
+                    "type": "boolean"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string",
+                    "example": "bridge"
+                },
+                "scope": {
+                    "type": "string",
+                    "example": "local"
+                },
+                "subnet": {
+                    "type": "string",
+                    "example": "172.17.0.0/16"
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.DockerNetworkList": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "networks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.DockerNetworkInfo"
+                    }
+                },
+                "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.DockerSettings": {
             "type": "object",
             "properties": {
@@ -6183,11 +7020,17 @@
                 "bios": {
                     "$ref": "#/definitions/dto.BIOSInfo"
                 },
+                "boot": {
+                    "$ref": "#/definitions/dto.BootInfo"
+                },
                 "cache": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/dto.CPUCacheInfo"
                     }
+                },
+                "chassis": {
+                    "$ref": "#/definitions/dto.ChassisInfo"
                 },
                 "cpu": {
                     "$ref": "#/definitions/dto.CPUHardwareInfo"
@@ -6203,6 +7046,9 @@
                 },
                 "timestamp": {
                     "type": "string"
+                },
+                "tpm": {
+                    "$ref": "#/definitions/dto.TPMInfo"
                 }
             }
         },
@@ -6363,6 +7209,51 @@
                     "items": {
                         "$ref": "#/definitions/dto.HealthCheckStatus"
                     }
+                }
+            }
+        },
+        "dto.HealthFinding": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "recommended_actions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ActionRef"
+                    }
+                },
+                "severity": {
+                    "description": "info|warning|critical",
+                    "type": "string",
+                    "example": "warning"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.HealthReport": {
+            "type": "object",
+            "properties": {
+                "critical_count": {
+                    "type": "integer"
+                },
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.HealthFinding"
+                    }
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "info_count": {
+                    "type": "integer"
+                },
+                "warning_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -6612,6 +7503,52 @@
                 }
             }
         },
+        "dto.MetricHistoryResult": {
+            "type": "object",
+            "properties": {
+                "avg": {
+                    "type": "number"
+                },
+                "count": {
+                    "type": "integer"
+                },
+                "entity": {
+                    "type": "string"
+                },
+                "last": {
+                    "type": "number"
+                },
+                "max": {
+                    "type": "number"
+                },
+                "metric": {
+                    "type": "string"
+                },
+                "min": {
+                    "type": "number"
+                },
+                "samples": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.MetricSample"
+                    }
+                },
+                "slope_per_sec": {
+                    "type": "number"
+                }
+            }
+        },
+        "dto.MetricSample": {
+            "type": "object",
+            "properties": {
+                "time_unix": {
+                    "type": "integer"
+                },
+                "value": {
+                    "type": "number"
+                }
+            }
+        },
         "dto.MoverSettings": {
             "description": "Mover configuration, schedule, and current status",
             "type": "object",
@@ -6637,6 +7574,56 @@
                     "example": "0 12 * * *"
                 },
                 "timestamp": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.MoverStatus": {
+            "description": "Mover state, schedule, last-run timing, and file/byte transfer statistics.",
+            "type": "object",
+            "properties": {
+                "active": {
+                    "description": "Active indicates whether the mover is currently running (from var.ini shareMoverActive).",
+                    "type": "boolean",
+                    "example": false
+                },
+                "current_throughput_mbs": {
+                    "description": "CurrentThroughputMBs is the live throughput in MB/s. Always 0 in the conservative\nimplementation (live throughput tracking is out of scope).",
+                    "type": "number",
+                    "example": 0
+                },
+                "last_run_bytes_moved": {
+                    "description": "LastRunBytesMoved is the total bytes moved during the last run.",
+                    "type": "integer",
+                    "example": 5368709120
+                },
+                "last_run_duration_seconds": {
+                    "description": "LastRunDurationSeconds is the duration of the last run in seconds (finish - start).",
+                    "type": "integer",
+                    "example": 720
+                },
+                "last_run_files_moved": {
+                    "description": "LastRunFilesMoved is the number of files moved during the last run.",
+                    "type": "integer",
+                    "example": 1024
+                },
+                "last_run_finish": {
+                    "description": "LastRunFinish is the ISO-8601 timestamp when the last mover run ended.",
+                    "type": "string",
+                    "example": "2026-05-30T03:52:00Z"
+                },
+                "last_run_start": {
+                    "description": "LastRunStart is the ISO-8601 timestamp when the last mover run began.",
+                    "type": "string",
+                    "example": "2026-05-30T03:40:00Z"
+                },
+                "schedule": {
+                    "description": "Schedule is the cron schedule expression for the mover (from var.ini shareMoverSchedule).",
+                    "type": "string",
+                    "example": "40 3 * * *"
+                },
+                "timestamp": {
+                    "description": "Timestamp is when this status was collected.",
                     "type": "string"
                 }
             }
@@ -7440,6 +8427,35 @@
                 }
             }
         },
+        "dto.OSUpdateStatus": {
+            "type": "object",
+            "properties": {
+                "current_version": {
+                    "description": "CurrentVersion is the running Unraid OS version (e.g. \"7.2.0\").",
+                    "type": "string",
+                    "example": "7.2.0"
+                },
+                "latest_version": {
+                    "description": "LatestVersion is the newest version found in a local candidate file, if any.",
+                    "type": "string",
+                    "example": "7.2.1"
+                },
+                "status": {
+                    "description": "Status is one of: \"up_to_date\", \"update_available\", \"unknown\".",
+                    "type": "string",
+                    "example": "unknown"
+                },
+                "timestamp": {
+                    "description": "Timestamp records when the check was performed.",
+                    "type": "string"
+                },
+                "update_available": {
+                    "description": "UpdateAvailable is true when LatestVersion != \"\" and LatestVersion != CurrentVersion.",
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "dto.ParityCheckHistory": {
             "type": "object",
             "properties": {
@@ -7697,6 +8713,16 @@
                     "type": "number",
                     "example": 5.2
                 },
+                "disk_read_bytes_per_sec": {
+                    "description": "DiskReadBytesPerSec is the per-process disk read rate (bytes/sec), populated by\nthe /processes/io endpoint from /proc/\u003cpid\u003e/io. Omitted from the standard process list.",
+                    "type": "integer",
+                    "example": 1048576
+                },
+                "disk_write_bytes_per_sec": {
+                    "description": "DiskWriteBytesPerSec is the per-process disk write rate (bytes/sec), populated by\nthe /processes/io endpoint from /proc/\u003cpid\u003e/io. Omitted from the standard process list.",
+                    "type": "integer",
+                    "example": 524288
+                },
                 "memory_percent": {
                     "type": "number",
                     "example": 2.1
@@ -7806,6 +8832,29 @@
                     "type": "string"
                 }
             }
+        },
+        "dto.RiskTier": {
+            "type": "string",
+            "enum": [
+                "read_only",
+                "low",
+                "high"
+            ],
+            "x-enum-comments": {
+                "RiskHigh": "requires approval (e.g. stop array) — Phase 2",
+                "RiskLow": "reversible, low blast radius (e.g. restart container)",
+                "RiskReadOnly": "never changes state"
+            },
+            "x-enum-descriptions": [
+                "never changes state",
+                "reversible, low blast radius (e.g. restart container)",
+                "requires approval (e.g. stop array) — Phase 2"
+            ],
+            "x-enum-varnames": [
+                "RiskReadOnly",
+                "RiskLow",
+                "RiskHigh"
+            ]
         },
         "dto.SMARTAttribute": {
             "type": "object",
@@ -8139,6 +9188,28 @@
                     "type": "string",
                     "example": "Supermicro X11SCL-F"
                 },
+                "swap_free_bytes": {
+                    "type": "integer",
+                    "example": 7516192768
+                },
+                "swap_total_bytes": {
+                    "type": "integer",
+                    "example": 8589934592
+                },
+                "swap_usage_percent": {
+                    "description": "Swap Information",
+                    "type": "number",
+                    "example": 12.5
+                },
+                "swap_used_bytes": {
+                    "type": "integer",
+                    "example": 1073741824
+                },
+                "swappiness": {
+                    "description": "Swappiness is the kernel vm.swappiness tunable (0-200); -1 means unavailable.",
+                    "type": "integer",
+                    "example": 60
+                },
                 "temperatures": {
                     "description": "All Temperature Sensors",
                     "type": "array",
@@ -8186,6 +9257,26 @@
                 },
                 "timezone": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.TPMInfo": {
+            "type": "object",
+            "properties": {
+                "manufacturer": {
+                    "description": "Vendor ID when available",
+                    "type": "string",
+                    "example": "IFX"
+                },
+                "present": {
+                    "description": "A TPM device exists (/sys/class/tpm/tpm0)",
+                    "type": "boolean",
+                    "example": true
+                },
+                "version": {
+                    "description": "\"2.0\" or \"1.2\" when detectable",
+                    "type": "string",
+                    "example": "2.0"
                 }
             }
         },
@@ -8789,6 +9880,11 @@
         "dto.ZFSARCStats": {
             "type": "object",
             "properties": {
+                "configured_max_bytes": {
+                    "description": "ConfiguredMaxBytes is the user-set zfs_arc_max module parameter\n(0 = auto). Unraid 7.3 exposes this as a first-class tunable.",
+                    "type": "integer",
+                    "example": 0
+                },
                 "hit_ratio_percent": {
                     "description": "Hit Ratios",
                     "type": "number",
@@ -8815,7 +9911,7 @@
                     "example": 107374182400
                 },
                 "max_size_bytes": {
-                    "description": "Maximum ARC size",
+                    "description": "Effective maximum ARC size (arcstats c_max)",
                     "type": "integer",
                     "example": 16106127360
                 },
@@ -8996,6 +10092,13 @@
                     "type": "number",
                     "example": 1.5
                 },
+                "corrupted_files": {
+                    "description": "CorruptedFiles lists files with permanent (checksum) errors, as reported\nby `zpool status -v`. Unraid 7.3 (ZFS 2.4.1) surfaces these without a scrub.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "dedup_ratio": {
                     "description": "Deduplication and Compression",
                     "type": "number",
@@ -9020,6 +10123,11 @@
                     "description": "Health and Status",
                     "type": "string",
                     "example": "ONLINE"
+                },
+                "is_boot_pool": {
+                    "description": "IsBootPool flags the ZFS-mirrored/dedicated boot pool (Unraid 7.3 internal boot).",
+                    "type": "boolean",
+                    "example": false
                 },
                 "name": {
                     "description": "Pool Identification",

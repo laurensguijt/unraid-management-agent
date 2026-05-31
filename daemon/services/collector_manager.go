@@ -3,7 +3,9 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/dto"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/logger"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/collectors"
+	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/controllers"
 )
 
 // Collector is the interface that all collectors must implement for runtime management
@@ -223,8 +226,8 @@ func (cm *CollectorManager) UpdateInterval(name string, intervalSeconds int) err
 		return fmt.Errorf("unknown collector: %s", name)
 	}
 
-	if intervalSeconds < 5 || intervalSeconds > 3600 {
-		return fmt.Errorf("invalid interval: must be between 5 and 3600 seconds")
+	if intervalSeconds < 5 || intervalSeconds > 86400 {
+		return errors.New("invalid interval: must be between 5 and 86400 seconds")
 	}
 
 	wasRunning := mc.Status == "running"
@@ -285,7 +288,8 @@ func (cm *CollectorManager) GetAllStatus() dto.CollectorsStatusResponse {
 		"system", "array", "disk", "docker", "vm",
 		"ups", "nut", "gpu", "shares", "network",
 		"hardware", "zfs", "notification", "registration", "unassigned",
-		"fancontrol", "tuning",
+		"fancontrol", "tuning", "docker_update", "docker_networks", "plugin_update",
+		"os_update", "mover",
 	}
 
 	for _, name := range collectorOrder {
@@ -361,23 +365,28 @@ func (cm *CollectorManager) buildStateEvent(name string, enabled bool) dto.Colle
 // getDefaultInterval returns the default interval for a collector
 func (cm *CollectorManager) getDefaultInterval(name string) int {
 	defaults := map[string]int{
-		"system":       5,
-		"array":        10,
-		"disk":         30,
-		"docker":       10,
-		"vm":           10,
-		"ups":          10,
-		"nut":          10,
-		"gpu":          10,
-		"shares":       60,
-		"network":      15,
-		"hardware":     60,
-		"zfs":          30,
-		"notification": 30,
-		"registration": 300,
-		"unassigned":   60,
-		"fancontrol":   30,
-		"tuning":       120,
+		"system":          5,
+		"array":           10,
+		"disk":            30,
+		"docker":          10,
+		"vm":              10,
+		"ups":             10,
+		"nut":             10,
+		"gpu":             10,
+		"shares":          60,
+		"network":         15,
+		"hardware":        60,
+		"zfs":             30,
+		"notification":    30,
+		"registration":    300,
+		"unassigned":      60,
+		"fancontrol":      30,
+		"tuning":          120,
+		"docker_update":   constants.IntervalDockerUpdate,
+		"docker_networks": constants.IntervalDockerNetworks,
+		"plugin_update":   constants.IntervalPluginUpdate,
+		"os_update":       constants.IntervalOSUpdate,
+		"mover":           constants.IntervalMover,
 	}
 
 	if interval, ok := defaults[name]; ok {
@@ -481,4 +490,96 @@ func (cm *CollectorManager) RegisterAllCollectors() {
 	cm.Register("tuning", func(ctx *domain.Context) Collector {
 		return collectors.NewTuningCollector(ctx)
 	}, intervals.Tuning, false)
+
+	// DockerUpdate collector — checks container images for available updates.
+	// CheckFn and NotifyFn are injected here (not in the collector) to avoid a
+	// collectors→controllers import cycle.
+	cm.Register("docker_update", func(ctx *domain.Context) Collector {
+		c := collectors.NewDockerUpdateCollector(ctx)
+		c.CheckFn = func() (*dto.ContainerUpdatesResult, error) {
+			dc := controllers.NewDockerController()
+			defer func() { _ = dc.Close() }()
+			return dc.CheckAllContainerUpdates()
+		}
+		c.NotifyFn = func(names []string) {
+			if err := controllers.CreateNotification(
+				"Container updates available",
+				"Docker",
+				fmt.Sprintf("Updates available for: %s", strings.Join(names, ", ")),
+				"info",
+				"",
+			); err != nil {
+				logger.Warning("docker_update: failed to create notification: %v", err)
+			}
+		}
+		return c
+	}, intervals.DockerUpdate, false)
+
+	// DockerNetworks collector — lists all Docker networks.
+	// ListFn is injected here (not in the collector) to avoid a
+	// collectors→controllers import cycle.
+	cm.Register("docker_networks", func(ctx *domain.Context) Collector {
+		c := collectors.NewDockerNetworksCollector(ctx)
+		c.ListFn = func() ([]dto.DockerNetworkInfo, error) {
+			dc := controllers.NewDockerController()
+			defer func() { _ = dc.Close() }()
+			return dc.ListNetworks()
+		}
+		return c
+	}, intervals.DockerNetworks, false)
+
+	// PluginUpdate collector — checks installed plugins for available updates.
+	// CheckFn and NotifyFn are injected here (not in the collector) to avoid a
+	// collectors→controllers import cycle.
+	cm.Register("plugin_update", func(ctx *domain.Context) Collector {
+		c := collectors.NewPluginUpdateCollector(ctx)
+		c.CheckFn = func() (*dto.PluginList, error) {
+			pc := controllers.NewPluginController()
+			updates, err := pc.CheckPluginUpdates()
+			if err != nil {
+				return nil, err
+			}
+			return &dto.PluginList{
+				Plugins:          updates,
+				TotalCount:       len(updates),
+				UpdatesAvailable: len(updates),
+			}, nil
+		}
+		c.NotifyFn = func(names []string) {
+			if err := controllers.CreateNotification(
+				"Plugin updates available",
+				"Plugins",
+				fmt.Sprintf("Updates available for: %s", strings.Join(names, ", ")),
+				"info",
+				"",
+			); err != nil {
+				logger.Warning("plugin_update: failed to create notification: %v", err)
+			}
+		}
+		return c
+	}, intervals.PluginUpdate, false)
+
+	// OSUpdate collector — best-effort local-file-only OS update availability check.
+	// The default CheckFn reads only local files (no outbound network calls).
+	// NotifyFn is injected here to avoid a collectors→controllers import cycle.
+	cm.Register("os_update", func(ctx *domain.Context) Collector {
+		c := collectors.NewOSUpdateCollector(ctx)
+		c.NotifyFn = func(latest string) {
+			if err := controllers.CreateNotification(
+				"Unraid OS update available",
+				"System",
+				fmt.Sprintf("A new Unraid OS version is available: %s", latest),
+				"info",
+				"",
+			); err != nil {
+				logger.Warning("os_update: failed to create notification: %v", err)
+			}
+		}
+		return c
+	}, intervals.OSUpdate, false)
+
+	// Mover collector — reads var.ini state + /var/log/mover.log (local files only).
+	cm.Register("mover", func(ctx *domain.Context) Collector {
+		return collectors.NewMoverCollector(ctx)
+	}, intervals.Mover, false)
 }

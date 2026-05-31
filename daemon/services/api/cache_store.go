@@ -13,6 +13,10 @@ import (
 // networkServicesCacheTTL controls how often network services status is refreshed.
 const networkServicesCacheTTL = 30 * time.Second
 
+// parityHistoryCacheTTL controls how often parity check history is refreshed from
+// disk. Parity checks complete infrequently, so a longer TTL is appropriate.
+const parityHistoryCacheTTL = 60 * time.Second
+
 // Compile-time assertion: CacheStore satisfies alerting.DataProvider.
 var _ alerting.DataProvider = (*CacheStore)(nil)
 
@@ -41,6 +45,12 @@ type CacheStore struct {
 	networkServicesCache atomic.Pointer[dto.NetworkServicesStatus]
 	fanControlCache      atomic.Pointer[dto.FanControlStatus]
 	tuningCache          atomic.Pointer[dto.TuningInfo]
+	dockerUpdatesCache   atomic.Pointer[dto.ContainerUpdatesResult]
+	dockerNetworksCache  atomic.Pointer[dto.DockerNetworkList]
+	pluginUpdatesCache   atomic.Pointer[dto.PluginList]
+	osUpdateCache        atomic.Pointer[dto.OSUpdateStatus]
+	moverCache           atomic.Pointer[dto.MoverStatus]
+	parityHistoryCache   atomic.Pointer[dto.ParityCheckHistory]
 }
 
 // ---------- Pointer-type getters (direct Load) ----------
@@ -118,12 +128,73 @@ func (c *CacheStore) GetSharesCache() []dto.ShareInfo {
 	return nil
 }
 
-// GetDockerCache returns cached Docker container information.
+// GetDockerCache returns cached Docker container information with update status
+// merged in from the docker_update collector's cache. The raw stored slice is
+// never mutated — a shallow copy is returned with update fields overlaid.
 func (c *CacheStore) GetDockerCache() []dto.ContainerInfo {
-	if v := c.dockerCache.Load(); v != nil {
-		return *v
+	v := c.dockerCache.Load()
+	if v == nil {
+		return nil
 	}
-	return nil
+
+	updates := map[string]dto.ContainerUpdateInfo{}
+	var checkedAt *time.Time
+	if u := c.dockerUpdatesCache.Load(); u != nil {
+		for i := range u.Containers {
+			updates[u.Containers[i].ContainerID] = u.Containers[i]
+		}
+		if !u.Timestamp.IsZero() {
+			t := u.Timestamp
+			// checkedAt is a single immutable copy; sharing the pointer across containers is safe.
+			checkedAt = &t
+		}
+	}
+
+	out := make([]dto.ContainerInfo, len(*v))
+	for i, ci := range *v {
+		if info, ok := updates[ci.ID]; ok {
+			status := info.Status()
+			ci.UpdateStatus = status
+			if status != dto.UpdateStatusUnknown {
+				avail := info.UpdateAvailable
+				ci.UpdateAvailable = &avail
+			} else {
+				ci.UpdateAvailable = nil
+			}
+			ci.UpdateChecked = checkedAt
+		} else {
+			ci.UpdateStatus = dto.UpdateStatusUnknown
+			ci.UpdateAvailable = nil
+			ci.UpdateChecked = nil
+		}
+		out[i] = ci
+	}
+	return out
+}
+
+// GetContainerUpdatesCache returns the cached container update result, or nil.
+func (c *CacheStore) GetContainerUpdatesCache() *dto.ContainerUpdatesResult {
+	return c.dockerUpdatesCache.Load()
+}
+
+// GetDockerNetworksCache returns the cached Docker network list, or nil.
+func (c *CacheStore) GetDockerNetworksCache() *dto.DockerNetworkList {
+	return c.dockerNetworksCache.Load()
+}
+
+// GetPluginUpdatesCache returns the cached plugin update list, or nil.
+func (c *CacheStore) GetPluginUpdatesCache() *dto.PluginList {
+	return c.pluginUpdatesCache.Load()
+}
+
+// GetOSUpdateCache returns the cached OS update status, or nil.
+func (c *CacheStore) GetOSUpdateCache() *dto.OSUpdateStatus {
+	return c.osUpdateCache.Load()
+}
+
+// GetMoverCache returns the cached mover status, or nil.
+func (c *CacheStore) GetMoverCache() *dto.MoverStatus {
+	return c.moverCache.Load()
 }
 
 // GetVMsCache returns cached VM information.
@@ -176,11 +247,33 @@ func (c *CacheStore) GetZFSSnapshotsCache() []dto.ZFSSnapshot {
 
 // ---------- Non-collector caches ----------
 
-// GetParityHistoryCache returns cached parity check history.
-// Note: This is dynamically loaded, not cached by a collector.
-// Returns an empty sentinel so callers never receive nil.
+// GetParityHistoryCache returns parity check history, refreshing from disk when
+// the cache is stale (older than parityHistoryCacheTTL).
+//
+// Parity history is loaded on demand rather than by a periodic collector. The
+// previous implementation returned an empty sentinel unconditionally, which made
+// the get_parity_history MCP tool always report "no parity check history
+// available" even when the log was populated (issue #114). It now reads the real
+// parity-checks.log via the parity collector.
 func (c *CacheStore) GetParityHistoryCache() *dto.ParityCheckHistory {
-	return &dto.ParityCheckHistory{}
+	if cached := c.parityHistoryCache.Load(); cached != nil {
+		if time.Since(cached.Timestamp) < parityHistoryCacheTTL {
+			return cached
+		}
+	}
+
+	pc := collectors.NewParityCollector()
+	history, err := pc.GetParityHistory()
+	if err != nil {
+		logger.Warning("CacheStore: failed to refresh parity history: %v", err)
+		if stale := c.parityHistoryCache.Load(); stale != nil {
+			return stale // return stale data if available
+		}
+		return &dto.ParityCheckHistory{Records: []dto.ParityCheckRecord{}}
+	}
+
+	c.parityHistoryCache.Store(history)
+	return history
 }
 
 // GetNetworkServicesCache returns cached network services status,

@@ -45,6 +45,10 @@ type AlertEnv struct {
 	RAMTotalBytes   uint64  `expr:"RAMTotalBytes"`
 	RAMUsedBytes    uint64  `expr:"RAMUsedBytes"`
 	RAMFreeBytes    uint64  `expr:"RAMFreeBytes"`
+	SwapUsedPct     float64 `expr:"SwapUsedPct"`
+	SwapTotalBytes  uint64  `expr:"SwapTotalBytes"`
+	SwapUsedBytes   uint64  `expr:"SwapUsedBytes"`
+	SwapFreeBytes   uint64  `expr:"SwapFreeBytes"`
 	CPUTemp         float64 `expr:"CPUTemp"`
 	MotherboardTemp float64 `expr:"MotherboardTemp"`
 	Uptime          int64   `expr:"Uptime"`
@@ -61,18 +65,20 @@ type AlertEnv struct {
 	NumParityDisks      int     `expr:"NumParityDisks"`
 
 	// Aggregated
-	ContainerCount    int     `expr:"ContainerCount"`
-	RunningContainers int     `expr:"RunningContainers"`
-	StoppedContainers int     `expr:"StoppedContainers"`
-	VMCount           int     `expr:"VMCount"`
-	RunningVMs        int     `expr:"RunningVMs"`
-	MaxDiskTemp       float64 `expr:"MaxDiskTemp"`
-	MaxDiskUsedPct    float64 `expr:"MaxDiskUsedPct"`
-	TotalDiskErrors   int     `expr:"TotalDiskErrors"`
-	UPSStatus         string  `expr:"UPSStatus"`
-	UPSBatteryCharge  float64 `expr:"UPSBatteryCharge"`
-	UPSLoadPercent    float64 `expr:"UPSLoadPercent"`
-	UPSRuntimeLeft    float64 `expr:"UPSRuntimeLeft"`
+	ContainerCount            int     `expr:"ContainerCount"`
+	RunningContainers         int     `expr:"RunningContainers"`
+	StoppedContainers         int     `expr:"StoppedContainers"`
+	ContainerUpdatesAvailable int     `expr:"ContainerUpdatesAvailable"`
+	PluginUpdatesAvailable    int     `expr:"PluginUpdatesAvailable"`
+	VMCount                   int     `expr:"VMCount"`
+	RunningVMs                int     `expr:"RunningVMs"`
+	MaxDiskTemp               float64 `expr:"MaxDiskTemp"`
+	MaxDiskUsedPct            float64 `expr:"MaxDiskUsedPct"`
+	TotalDiskErrors           int     `expr:"TotalDiskErrors"`
+	UPSStatus                 string  `expr:"UPSStatus"`
+	UPSBatteryCharge          float64 `expr:"UPSBatteryCharge"`
+	UPSLoadPercent            float64 `expr:"UPSLoadPercent"`
+	UPSRuntimeLeft            float64 `expr:"UPSRuntimeLeft"`
 
 	// GPU
 	GPUCount      int     `expr:"GPUCount"`
@@ -85,6 +91,9 @@ type AlertEnv struct {
 	MaxZFSPoolUsedPct float64 `expr:"MaxZFSPoolUsedPct"`
 	ZFSDegradedPools  int     `expr:"ZFSDegradedPools"`
 	ZFSFaultedPools   int     `expr:"ZFSFaultedPools"`
+	ZFSCorruptedFiles int     `expr:"ZFSCorruptedFiles"` // Total corrupted files across all pools
+	BootPoolHealthy   bool    `expr:"BootPoolHealthy"`   // True when the ZFS boot pool is ONLINE (or no boot pool)
+	BootPoolHealth    string  `expr:"BootPoolHealth"`    // Boot pool health ("ONLINE", "DEGRADED", ...); empty when no ZFS boot pool exists
 
 	// Network
 	NetworkErrors  uint64 `expr:"NetworkErrors"`
@@ -100,6 +109,16 @@ type AlertEnv struct {
 	UnreadNotifications  int `expr:"UnreadNotifications"`
 	WarningNotifications int `expr:"WarningNotifications"`
 	AlertNotifications   int `expr:"AlertNotifications"`
+
+	// Trends (derived from MetricsHistory)
+	ArrayFillETAHours           float64 `expr:"ArrayFillETAHours"`
+	MaxDiskFillETAHours         float64 `expr:"MaxDiskFillETAHours"`
+	CPUTempSlopePerMin          float64 `expr:"CPUTempSlopePerMin"`
+	MaxDiskTempSlopePerMin      float64 `expr:"MaxDiskTempSlopePerMin"`
+	MaxContainerRestartsPerHour float64 `expr:"MaxContainerRestartsPerHour"`
+	MaxReallocatedSectors       int     `expr:"MaxReallocatedSectors"`
+	MaxPendingSectors           int     `expr:"MaxPendingSectors"`
+	DiskErrorsIncreasing        bool    `expr:"DiskErrorsIncreasing"`
 }
 
 // AlertRulesConfig is the top-level structure persisted to the JSON config file.

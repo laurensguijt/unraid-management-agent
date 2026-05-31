@@ -5,8 +5,41 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruaan-deysel/unraid-management-agent/daemon/constants"
+	"github.com/ruaan-deysel/unraid-management-agent/daemon/domain"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/dto"
 )
+
+func TestEngineSetEventBusPublishesWake(t *testing.T) {
+	bus := domain.NewEventBus(8)
+	ch := bus.SubTopics(constants.TopicAgentWake)
+	e := NewEngine(NewStore(t.TempDir()), nil)
+	e.SetEventBus(bus)
+	e.publishWake(dto.AlertEvent{RuleName: "High CPU", Severity: "warning", Message: "cpu 95%", State: "firing"})
+	select {
+	case msg := <-ch:
+		ev := msg.(dto.AgentWakeEvent)
+		if ev.Source != "alert" || ev.Subsystem != "High CPU" {
+			t.Fatalf("unexpected wake: %+v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no wake published")
+	}
+}
+
+func TestEngineNoWakeWhenResolvedOrNoBus(t *testing.T) {
+	e := NewEngine(NewStore(t.TempDir()), nil)
+	e.publishWake(dto.AlertEvent{RuleName: "x", State: "firing"}) // no bus → must not panic
+	bus := domain.NewEventBus(8)
+	ch := bus.SubTopics(constants.TopicAgentWake)
+	e.SetEventBus(bus)
+	e.publishWake(dto.AlertEvent{RuleName: "x", State: "resolved"}) // resolved → no publish
+	select {
+	case <-ch:
+		t.Fatal("resolved alert must not publish a wake")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
 
 // mockDataProvider implements DataProvider for testing.
 type mockDataProvider struct {
@@ -29,6 +62,7 @@ func (m *mockDataProvider) GetZFSPoolsCache() []dto.ZFSPool              { retur
 func (m *mockDataProvider) GetNetworkCache() []dto.NetworkInfo           { return nil }
 func (m *mockDataProvider) GetNUTCache() *dto.NUTResponse                { return nil }
 func (m *mockDataProvider) GetNotificationsCache() *dto.NotificationList { return nil }
+func (m *mockDataProvider) GetPluginUpdatesCache() *dto.PluginList       { return nil }
 
 func newMockProvider() *mockDataProvider {
 	return &mockDataProvider{
@@ -258,6 +292,43 @@ func TestEngineStartStop(t *testing.T) {
 		// OK
 	case <-time.After(2 * time.Second):
 		t.Fatal("engine did not stop within timeout")
+	}
+}
+
+func TestContainerUpdatesAvailableMetric(t *testing.T) {
+	avail := true
+	notAvail := false
+	provider := &mockDataProvider{
+		containers: []dto.ContainerInfo{
+			{Name: "plex", State: "running", UpdateAvailable: &avail, UpdateStatus: dto.UpdateStatusAvailable},
+			{Name: "sonarr", State: "running", UpdateAvailable: &notAvail, UpdateStatus: dto.UpdateStatusUpToDate},
+			{Name: "radarr", State: "running", UpdateStatus: dto.UpdateStatusUnknown},
+		},
+	}
+	dir := t.TempDir()
+	store := NewStore(dir)
+	e := NewEngine(store, provider)
+	env := e.buildEnv()
+	if env.ContainerUpdatesAvailable != 1 {
+		t.Errorf("ContainerUpdatesAvailable = %d, want 1", env.ContainerUpdatesAvailable)
+	}
+}
+
+func TestEngineTrendFields(t *testing.T) {
+	provider := &mockDataProvider{}
+	e := NewEngine(NewStore(t.TempDir()), provider)
+	base := time.Unix(1_700_000_000, 0)
+	for i := 0; i < 30; i++ {
+		e.history.Record("cpu_temp", "", 40+0.5*float64(i), base.Add(time.Duration(i)*15*time.Second))
+		e.history.Record("array_used_pct", "", 80+0.03*float64(i), base.Add(time.Duration(i)*15*time.Second))
+	}
+	var env dto.AlertEnv
+	e.overlayTrends(&env)
+	if env.CPUTempSlopePerMin <= 0 {
+		t.Errorf("CPUTempSlopePerMin = %v, want > 0", env.CPUTempSlopePerMin)
+	}
+	if env.ArrayFillETAHours <= 0 {
+		t.Errorf("ArrayFillETAHours = %v, want > 0", env.ArrayFillETAHours)
 	}
 }
 

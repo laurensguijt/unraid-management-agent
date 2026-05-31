@@ -11,7 +11,229 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ZFS disk usage percentage precision** - ZFS-backed cache and pool disks now derive `usage_percent` from `allocated / size` and keep 3 decimal places instead of using zpool's rounded whole-number `capacity` column
+- **MCP `get_parity_history` always returned "No parity check history available"**
+  (issue #114) — the cache layer's `GetParityHistoryCache()` was a stub that
+  unconditionally returned an empty result, so the MCP tool (and the parity section of
+  `system_health_report` / `get_diagnostic_summary`) never reported any history even
+  when `/boot/config/parity-checks.log` was populated. It now loads and caches the real
+  parity-checks log (60 s TTL), matching the `GET /api/v1/array/parity-check/history`
+  REST endpoint. Verified live: REST, MCP, and the on-disk log all report identical
+  record counts.
+
+### Changed
+
+- **More robust `parity_valid` determination** (issues #98, #114) — array parity
+  validity now corroborates the `var.ini` `sbSynced` signal against the parity-checks
+  log: when the array is started with parity disks and the most recent parity check/sync
+  completed successfully (exit 0, zero errors), parity is reported valid even on Unraid
+  versions that omit or zero out `sbSynced`. This corroboration is additive (it can only
+  confirm validity, never mask sync errors). Added comprehensive debug logging of every
+  signal feeding the decision (`sbSynced`, `sbSynced2`, `sbSyncErrs`, `sbSyncExit`,
+  `mdNumInvalid`, `mdResync`, `numParityDisks`, state) to aid future diagnosis.
+
+## [2026.06.01] - 2026-06-01
+
+### Added
+
+- **Agent Core (Phase 2 — Autonomy & Approval):**
+
+  - **Event-driven triggers:** the alerting Engine and watchdog Runner publish a
+    `dto.AgentWakeEvent` to the `agent_wake` typed pub-sub topic whenever an alert
+    fires or a health check fails. The agent subscribes at daemon startup (before
+    collectors start) and spawns autonomous investigation sessions automatically.
+    Wake events are debounced (default 30 s), deduplicated by subsystem, and rate-limited
+    by a per-subsystem cooldown (default 300 s). A concurrency cap (default 2) prevents
+    more than a configurable number of parallel autonomous sessions.
+  - **Approval gate (pause / resume):** when the agent proposes a tool whose risk tier
+    maps to `approve`, the session pauses with status `awaiting_approval` and a
+    `pending_approval` object (`action_id`, `tool`, `args`, `risk_tier`, `reason`).
+    The full conversation transcript is persisted to disk so the session survives a
+    daemon restart. Approving or denying the action resumes the loop from where it
+    left off. An automatic TTL sweeper (default 3 600 s / 1 hour) denies any approval
+    that has not been resolved within the configured window.
+  - **Non-overridable forbid-list:** a hard-coded list of irreversible disk operations
+    (`format_disk`, `clear_parity`, `disable_parity`, `partition_disk`,
+    `delete_array_disk`) that the agent will describe but the gate **never** executes,
+    even with explicit operator approval. The list is also configurable via the
+    `forbid_list` field in `agent_config.json`.
+  - **REST endpoints:** `POST /api/v1/agent/sessions/{id}/approve` (body
+    `{"action_id":"…","approve":true|false}`) approves or denies a pending action and
+    resumes the session; `POST /api/v1/agent/sessions/{id}/cancel` cancels a running
+    or awaiting-approval session.
+  - **MCP agent tools:** `agent_start_session`, `agent_get_session`,
+    `agent_list_sessions`, `agent_approve_action` — exposing the full agent lifecycle
+    to external MCP clients.
+  - **New WebSocket events** on the `agent_stream` topic: `agent_approval_required`
+    (session paused, pending action details in payload) and `agent_session_cancelled`.
+  - **OpenAI-compatible LLM providers:** in addition to `"anthropic"`, the `provider`
+    field now accepts `"openai"`, `"openrouter"`, and `"gemini"`. OpenRouter uses
+    `https://openrouter.ai/api/v1/chat/completions` by default; Gemini uses
+    `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`. All
+    providers read the API key from `UMA_AGENT_API_KEY`. Example free model via
+    OpenRouter: `openai/gpt-oss-20b:free`.
+  - **New `agent_config.json` fields:** `wake_debounce_secs` (default `30`),
+    `wake_cooldown_secs` (default `300`), `max_concurrent_sessions` (default `2`),
+    `approval_ttl_secs` (default `3600`), `forbid_list` (`[]string`).
+
+- **Agent Core (Phase 1):** embedded autonomous operator with a pluggable LLM provider
+  (Anthropic), a risk-tiered tool registry (read-only + low-risk auto-execute; high-risk
+  reserved for approval), a bounded ReAct reasoning loop with iteration/token/deadline
+  caps, JSON-persisted sessions, REST endpoints under `/api/v1/agent`, and a WebSocket
+  `agent_stream` event feed. Disabled by default; opt-in via `agent_config.json`
+  (`enabled: true`) and the `UMA_AGENT_API_KEY` environment variable.
+- **Continuous Docker container update detection** — a new background `docker_update`
+  collector (default 6 h interval, staggered start, registry-rate-limit-safe) performs
+  periodic digest comparisons for all running containers without blocking normal Docker
+  polling.
+  - `update_status`, `update_available`, and `update_checked` fields exposed on every
+    container in `GET /api/v1/docker`, `GET /api/v1/docker/{id}`, MCP
+    `list_containers`, and MCP `get_container_info`.
+  - `GET /api/v1/docker/updates` now serves the cached result instantly (no
+    live check on request; populated by the background collector).
+  - `POST /api/v1/docker/updates/refresh` triggers an immediate re-check outside the
+    normal schedule and publishes the result via the event hub.
+  - MCP tool `refresh_container_updates` exposes the same on-demand refresh to AI
+    agents.
+  - `ContainerUpdatesAvailable` alerting metric — counts containers with an update
+    ready; usable in alert rule expressions.
+  - Opt-in startup notification when new container updates are detected:
+    `--docker-update-notify` flag / `DOCKER_UPDATE_NOTIFY=true` env variable.
+- **Trend / predictive alerting** — in-memory ring-buffer `MetricsHistory` samples
+  key metrics continuously. New alerting-expression fields:
+  - `ArrayFillETAHours` — hours until the array is full at current fill rate
+  - `MaxDiskFillETAHours` — hours until the fastest-filling individual disk is full
+  - `CPUTempSlopePerMin` — CPU temperature trend (°C / min)
+  - `MaxDiskTempSlopePerMin` — steepest disk temperature rise across all disks (°C / min)
+  - `MaxContainerRestartsPerHour` — highest container restart rate over the sampled window
+  - `MaxReallocatedSectors` — maximum reallocated sector count across all array disks
+  - `MaxPendingSectors` — maximum pending sector count across all array disks
+  - `DiskErrorsIncreasing` — `true` when any disk's error count is trending upward
+  - Disk SMART attributes (`Reallocated_Sector_Ct`, `Current_Pending_Sector`) now
+    collected via `smartctl -A` and surfaced in the alerting environment.
+- **Alert rule templates** — `GET /api/v1/alerts/templates` and MCP tool
+  `list_alert_templates` return five curated, disabled-by-default rule templates using
+  trend/predictive metrics. Users can review, copy, and enable them in their rule config.
+- **One-click alert template enable** — `POST /api/v1/alerts/templates/{id}/enable` and
+  MCP tool `enable_alert_template` instantiate and enable an alert rule directly from a
+  template ID (e.g. `tmpl-array-fill`) in a single call. Idempotent — re-posting updates
+  the existing rule without duplication. Defaults notification channels to `["unraid"]`
+  (Unraid built-in notifications) when no `channels` body is provided.
+- **Container network I/O** — `network_rx_bytes`, `network_tx_bytes`,
+  `network_rx_bytes_per_sec`, and `network_tx_bytes_per_sec` fields now populated on
+  every container in `GET /api/v1/docker` and `GET /api/v1/docker/{id}` via sampling
+  from `/proc/<pid>/net/dev`. `restart_count` field also added to each container.
+- **Docker networks** — new `GET /api/v1/docker/networks` endpoint and MCP tool
+  `list_docker_networks` expose all Docker networks with driver, scope, IPAM subnet /
+  gateway, and the list of connected container names.
+- **Continuous plugin update detection** — a new background `plugin_update` collector
+  (configurable via `INTERVAL_PLUGIN_UPDATE`, default 6 h) checks all installed plugins
+  for updates and caches the result. `POST /api/v1/plugins/updates/refresh` and MCP
+  tool `refresh_plugin_updates` trigger an immediate re-check and publish the result
+  via the event hub. `PluginUpdatesAvailable` alert metric counts plugins with a pending
+  update.
+- **OS update availability (local-only)** — new `GET /api/v1/os/update` endpoint and
+  MCP tool `get_os_update` return the cached OS update status sourced entirely from
+  local files (`/etc/unraid-version`, `/tmp/plugins/update/`). No outbound network
+  calls are made. A background `os_update` collector refreshes this on a configurable
+  interval (`INTERVAL_OS_UPDATE`, default 24 h). Status values: `up_to_date`,
+  `update_available`, `unknown`.
+- **Mover status** — new `GET /api/v1/mover` endpoint and MCP tool `get_mover_status`
+  expose the cached mover state: whether it is currently active, the cron schedule
+  from `var.ini`, and last-run statistics (start/finish timestamps, duration, files
+  moved, bytes moved) parsed from `/var/log/mover.log`. Refreshed by the new `mover`
+  collector (`INTERVAL_MOVER`, default 5 min).
+- **AI remediation toolkit:**
+  - **System health report** — `GET /api/v1/health/report` and MCP tool
+    `system_health_report` aggregate health signals from the array, disks, containers,
+    and firing alerts into a prioritised findings list with recommended actions.
+    The MCP tool is read-only by default; passing `confirm: true` together with an
+    `actions` list (from a previous report) executes supported actions
+    (`start/stop/restart_container`, `start/stop/restart/force_stop_vm`) via the
+    remediation executor.
+  - **Metric history query** — `GET /api/v1/metrics/history?metric=&entity=` and MCP
+    tool `query_metric_history` return all buffered ring-buffer samples plus summary
+    statistics (slope per second, min, max, average, last value) for any tracked metric.
+    Global metrics: `cpu_temp`, `array_used_pct`. Per-entity metrics: `disk_temp`,
+    `disk_used_pct`, `disk_errors`, `reallocated`, `pending`, `restart_count`.
+  - **Runbook catalogue** — MCP tool `list_runbooks` lists reviewed remediation
+    runbooks. `run_runbook` dry-runs or executes a named runbook (requires
+    `confirm: true` to execute). `find_root_cause` correlates cached system signals
+    (CPU, array, parity, disk temperatures, containers) to surface the most likely
+    root causes of degraded performance or health.
+- **New collectors:** `docker_networks`, `plugin_update`, `os_update`, `mover` —
+  each follows the standard collector pattern with panic recovery, configurable
+  polling interval, and WebSocket / event-hub publishing on each update.
+- **New environment variables / CLI flags for collector intervals:**
+  `INTERVAL_DOCKER_NETWORKS`, `INTERVAL_PLUGIN_UPDATE`, `INTERVAL_OS_UPDATE`,
+  `INTERVAL_MOVER`.
+
+### Changed
+
+- **`GET /api/v1/docker/updates`** now returns the cached result immediately instead
+  of performing a live registry check on each request; use the new `POST
+/api/v1/docker/updates/refresh` to force an on-demand re-check.
+- **Runtime collector interval cap** raised from 3 600 s to 86 400 s (24 h) to
+  accommodate the new `docker_update` collector's default 6 h schedule.
+
+## [2026.06.00] - 2026-05-30
+
+### Added
+
+- **Unraid 7.3 support — new data exposed across the API/MQTT/MCP:**
+  - **Chassis serial number** in `/api/v1/hardware` (`chassis` block: manufacturer,
+    type, version, serial, asset tag) via sysfs DMI with dmidecode (type 3) fallback.
+    New HA sensor `Hardware: Chassis Serial`.
+  - **TPM presence/version** in `/api/v1/hardware` (`tpm` block) from
+    `/sys/class/tpm/tpm0` — supports Unraid 7.3 TPM-based licensing. New HA
+    binary sensor `Hardware: TPM Present`.
+  - **Boot device / boot pool** in `/api/v1/hardware` (`boot` block: device type
+    usb vs internal, backing device, filesystem, ZFS boot pool) — Unraid 7.3
+    internal-boot support. New HA sensor `Hardware: Boot Device Type`.
+  - **ZFS corrupted files** per pool (`corrupted_files`) parsed from
+    `zpool status -v` (ZFS 2.4.1 surfaces these without a scrub), plus
+    `is_boot_pool` flag. New HA sensor `ZFS: <pool> Corrupted Files`.
+  - **ZFS configured ARC max** (`configured_max_bytes`) from
+    `/sys/module/zfs/parameters/zfs_arc_max` (0 = auto) — Unraid 7.3 first-class
+    tunable. New HA sensor `ZFS ARC: Configured Max`.
+  - **Docker container MAC address** (`mac_address`) from `docker inspect`
+    (Docker 29 / Unraid 7.3 fixed-MAC support). New per-container HA sensor.
+  - **Per-process disk I/O** via new `GET /api/v1/processes/io` and MCP tool
+    `list_process_io` — top processes by I/O rate sampled natively from
+    `/proc/<pid>/io` (lighter than spawning iotop-c, no always-on cost).
+  - **New alert-rule fields:** `ZFSCorruptedFiles`, `BootPoolHealthy`,
+    `BootPoolHealth` (degraded ZFS boot pool / corrupted files alerting).
+- **Swap memory metrics in `/api/v1/system`** — the system collector now reports
+  `swap_total_bytes`, `swap_used_bytes`, `swap_free_bytes`, and `swap_usage_percent`
+  parsed from `/proc/meminfo`, plus the kernel `swappiness` tunable from
+  `/proc/sys/vm/swappiness` (`-1` when unavailable). Addresses the Home Assistant
+  integration swap-sensor request (ha-unraid-management-agent #45).
+- **Swap & swappiness Home Assistant sensors** — new MQTT discovery sensors
+  (`swap_usage`, `swap_used`, `swap_free`, `swap_total`, `swappiness`).
+- **Swap fields available to the alerting engine** — `SwapUsedPct`, `SwapTotalBytes`,
+  `SwapUsedBytes`, and `SwapFreeBytes` can now be used in alert rule expressions.
+- **Home Assistant notification event entity** — a new MQTT `event` entity
+  (`notifications/event` topic) fires a Home Assistant event for each new Unraid
+  notification, exposing the full notification details (id, title, subject,
+  description, importance, type, link, timestamp) as event attributes. The existing
+  backlog is seeded silently on startup so a restart does not replay old notifications.
+
+### Security
+
+- **Fixed reachable vulnerability GO-2026-5013** — bumped `golang.org/x/crypto`
+  v0.51.0 → v0.52.0 (byte-arithmetic underflow/panic in `golang.org/x/crypto/ssh`,
+  reachable via libvirt `ConnectToURI` → `ssh.Dial` in the VM collector).
+  `govulncheck ./...` now reports zero vulnerabilities.
+
+### Changed
+
+- **Dependencies bumped** — `github.com/nicholas-fedor/shoutrrr` → v0.15.1,
+  `golang.org/x/net` → v0.55.0, `golang.org/x/sys` → v0.45.0,
+  `golang.org/x/crypto` → v0.52.0; `go mod tidy` run. `go vet` clean.
+- **Unraid 7.3 regression checks (no change required):** verified RAM reporting is
+  unaffected by the 7.3 dmidecode unit-label change (memory device size is a
+  passthrough string; system memory comes from `/proc/meminfo`), and confirmed disk
+  SMART polling already uses `smartctl -n standby` so routine collection never wakes
+  spun-down drives (aligns with 7.3's "don't spin up the array on reads" fix).
 
 ## [2026.05.00] - 2026-05-16
 

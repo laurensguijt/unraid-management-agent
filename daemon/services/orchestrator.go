@@ -14,6 +14,7 @@ import (
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/domain"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/dto"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/logger"
+	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/agent"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/alerting"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/api"
 	"github.com/ruaan-deysel/unraid-management-agent/daemon/services/controllers"
@@ -31,6 +32,7 @@ type Orchestrator struct {
 	fanController    *controllers.FanController
 	cpuController    *controllers.CPUController
 	tuningController *controllers.TuningController
+	agentDocker      *controllers.DockerController
 }
 
 // CreateOrchestrator creates a new orchestrator with the given context.
@@ -96,6 +98,10 @@ func (o *Orchestrator) Run() error {
 	alertEngine := alerting.NewEngine(alertStore, apiServer)
 	apiServer.SetAlertEngine(alertEngine, alertStore)
 	mcpServer.SetAlertEngine(alertEngine, alertStore)
+	// Set the event bus before launching Start so the goroutine's publishWake
+	// reads of the hub field don't race with a later SetEventBus write.
+	// Publishing to agent_wake with no subscriber (agent disabled) is a no-op.
+	alertEngine.SetEventBus(o.ctx.Hub)
 	wg.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -112,6 +118,9 @@ func (o *Orchestrator) Run() error {
 	watchdog.SetDockerProvider(apiServer)
 	apiServer.SetWatchdog(watchdogRunner, watchdogStore)
 	mcpServer.SetWatchdog(watchdogRunner, watchdogStore)
+	// Set the event bus before launching Start to avoid racing with a later
+	// SetEventBus write. No-op publish if the agent is disabled.
+	watchdogRunner.SetEventBus(o.ctx.Hub)
 	wg.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -121,6 +130,31 @@ func (o *Orchestrator) Run() error {
 		watchdogRunner.Start(ctx)
 	})
 	logger.Success("Watchdog started")
+
+	// Initialize agent (disabled by default; opt-in via agent_config.json + UMA_AGENT_API_KEY)
+	agentCfg := agent.LoadConfig("")
+	if agentCfg.Enabled {
+		agentDocker := controllers.NewDockerController()
+		agentSvc, agentErr := agent.BuildService(agentCfg, "", apiServer, agentDocker, apiServer)
+		if agentErr != nil {
+			logger.Warning("Agent disabled: %v", agentErr)
+			_ = agentDocker.Close()
+		} else if agentSvc != nil {
+			o.agentDocker = agentDocker
+			apiServer.SetAgent(agentSvc)
+			agentSvc.SetEventBus(o.ctx.Hub)
+			mcpServer.SetAgent(agentSvc)
+			wg.Go(func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.LogPanicWithStack("Agent trigger goroutine", r)
+					}
+				}()
+				agentSvc.Start(ctx)
+			})
+			logger.Success("Agent service started (provider=%s, model=%s)", agentCfg.Provider, agentCfg.Model)
+		}
+	}
 
 	// Initialize fan controller (disabled by default, enabled via config)
 	fanCtrl := controllers.NewFanController()
@@ -213,7 +247,16 @@ func (o *Orchestrator) Run() error {
 		logger.Info("Tuning controller shut down")
 	}
 
-	// 4. Stop MQTT client if running
+	// 4. Close the agent's Docker controller if it was started
+	if o.agentDocker != nil {
+		if err := o.agentDocker.Close(); err != nil {
+			logger.Warning("Agent Docker controller close failed: %v", err)
+		}
+		o.agentDocker = nil
+		logger.Info("Agent Docker controller closed")
+	}
+
+	// 5. Stop MQTT client if running
 	if o.mqttClient != nil {
 		o.mqttClient.Disconnect()
 		logger.Info("MQTT client disconnected")
